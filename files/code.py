@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, send_file
+from flask import Flask, jsonify, send_file, render_template
 import pandas as pd
 import os
 import numpy as np
@@ -11,7 +11,6 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 
 app = Flask(__name__)
 
-# Параметры подключения к InfluxDB
 INFLUX_URL = os.getenv("INFLUX_URL", "http://influxdb:8086")
 INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "my-super-token")
 INFLUX_ORG = os.getenv("INFLUX_ORG", "analytics_org")
@@ -23,6 +22,7 @@ FORECAST_PATH = os.path.join(OUTPUT_DIR, "forecast.png")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+
 def get_client():
     return InfluxDBClient(
         url=INFLUX_URL,
@@ -30,11 +30,70 @@ def get_client():
         org=INFLUX_ORG
     )
 
+
+def build_forecast():
+    df = pd.read_csv(CSV_PATH)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    daily = df.groupby(df["timestamp"].dt.date).size()
+    daily.index = pd.to_datetime(daily.index)
+
+    x = np.arange(len(daily))
+    y = daily.values
+
+    coeffs = np.polyfit(x, y, 1)
+    trend = np.poly1d(coeffs)
+
+    future_days = 7
+    x_future = np.arange(len(daily) + future_days)
+    y_future = trend(x_future)
+    y_future = np.maximum(y_future, 0)
+
+    dates_future = pd.date_range(
+        start=daily.index.min(),
+        periods=len(daily) + future_days
+    )
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(daily.index, y, marker="o", label="Фактические данные")
+    plt.plot(dates_future, y_future, linestyle="--", label="Прогноз на 7 дней")
+    plt.title("Прогноз посещаемости сайта")
+    plt.xlabel("Дата")
+    plt.ylabel("Количество посещений")
+    plt.legend()
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(FORECAST_PATH)
+    plt.close()
+
+    return {
+        "historical_dates": [d.strftime("%Y-%m-%d") for d in daily.index],
+        "historical_values": [int(v) for v in y],
+        "forecast_dates": [d.strftime("%Y-%m-%d") for d in dates_future],
+        "forecast_values": [round(float(v), 2) for v in y_future]
+    }
+
+
+def get_stats_data():
+    df = pd.read_csv(CSV_PATH)
+
+    return {
+        "total_visits": int(len(df)),
+        "unique_users": int(df["user_id"].nunique()),
+        "avg_duration": round(float(df["duration"].mean()), 2),
+        "top_pages": df["page"].value_counts().to_dict(),
+        "top_sources": df["source"].value_counts().to_dict()
+    }
+
+
 @app.route("/")
 def home():
-    return jsonify({
-        "message": "Visit Analytics API is running"
-    })
+    try:
+        stats_result = get_stats_data()
+        return render_template("index.html", stats=stats_result)
+    except Exception as e:
+        return f"Ошибка при загрузке главной страницы: {str(e)}", 500
+
 
 @app.route("/load_data")
 def load_data():
@@ -71,6 +130,7 @@ def load_data():
             "message": str(e)
         }), 500
 
+
 @app.route("/visits")
 def visits():
     try:
@@ -82,114 +142,40 @@ def visits():
             "message": str(e)
         }), 500
 
+
 @app.route("/stats")
 def stats():
     try:
-        df = pd.read_csv(CSV_PATH)
-
-        stats_result = {
-            "total_visits": int(len(df)),
-            "unique_users": int(df["user_id"].nunique()),
-            "avg_duration": round(float(df["duration"].mean()), 2),
-            "top_pages": df["page"].value_counts().to_dict(),
-            "top_sources": df["source"].value_counts().to_dict()
-        }
-
-        return jsonify(stats_result)
-
+        return jsonify(get_stats_data())
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": str(e)
         }), 500
+
 
 @app.route("/forecast")
 def forecast():
     try:
-        df = pd.read_csv(CSV_PATH)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-        # агрегируем посещаемость по дням
-        daily = df.groupby(df["timestamp"].dt.date).size()
-        daily.index = pd.to_datetime(daily.index)
-
-        # линейный тренд
-        x = np.arange(len(daily))
-        y = daily.values
-
-        coeffs = np.polyfit(x, y, 1)
-        trend = np.poly1d(coeffs)
-
-        # прогноз на 7 дней вперед
-        future_days = 7
-        x_future = np.arange(len(daily) + future_days)
-        y_future = trend(x_future)
-
-        # чтобы не было отрицательных значений
-        y_future = np.maximum(y_future, 0)
-
-        dates_future = pd.date_range(
-            start=daily.index.min(),
-            periods=len(daily) + future_days
-        )
-
-        plt.figure(figsize=(12, 6))
-        plt.plot(daily.index, y, marker="o", label="Фактические данные")
-        plt.plot(dates_future, y_future, linestyle="--", label="Прогноз на 7 дней")
-        plt.title("Прогноз посещаемости сайта")
-        plt.xlabel("Дата")
-        plt.ylabel("Количество посещений")
-        plt.legend()
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        plt.savefig(FORECAST_PATH)
-        plt.close()
-
+        build_forecast()
         return send_file(FORECAST_PATH, mimetype="image/png")
-
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": str(e)
         }), 500
+
 
 @app.route("/forecast_data")
 def forecast_data():
     try:
-        df = pd.read_csv(CSV_PATH)
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-        daily = df.groupby(df["timestamp"].dt.date).size()
-        daily.index = pd.to_datetime(daily.index)
-
-        x = np.arange(len(daily))
-        y = daily.values
-
-        coeffs = np.polyfit(x, y, 1)
-        trend = np.poly1d(coeffs)
-
-        future_days = 7
-        x_future = np.arange(len(daily) + future_days)
-        y_future = trend(x_future)
-        y_future = np.maximum(y_future, 0)
-
-        dates_future = pd.date_range(
-            start=daily.index.min(),
-            periods=len(daily) + future_days
-        )
-
-        return jsonify({
-            "historical_dates": [d.strftime("%Y-%m-%d") for d in daily.index],
-            "historical_values": [int(v) for v in y],
-            "forecast_dates": [d.strftime("%Y-%m-%d") for d in dates_future],
-            "forecast_values": [round(float(v), 2) for v in y_future]
-        })
-
+        return jsonify(build_forecast())
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": str(e)
         }), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
