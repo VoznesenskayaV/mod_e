@@ -1,136 +1,299 @@
-from flask import Flask, jsonify, render_template
-from pymongo import MongoClient
-import os
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Анализ финансовых данных</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            padding: 0;
+        }
 
-app = Flask(__name__)
+        .container {
+            width: 92%;
+            max-width: 1200px;
+            margin: 30px auto;
+        }
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/")
-DB_NAME = "finance_db"
-COLLECTION_NAME = "financial_data"
+        .header {
+            background: white;
+            padding: 25px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            margin-bottom: 25px;
+        }
 
+        .header h1 {
+            margin: 0 0 10px 0;
+        }
 
-def get_collection():
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    return db[COLLECTION_NAME]
+        .header p {
+            color: #444;
+            line-height: 1.5;
+            margin: 6px 0;
+        }
 
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
 
-def get_all_data():
-    collection = get_collection()
-    return list(collection.find({}, {"_id": 0}).sort("month", 1))
+        .card {
+            background: white;
+            padding: 18px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            text-align: center;
+        }
 
+        .card h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #333;
+        }
 
-def get_aggregation():
-    collection = get_collection()
+        .card p {
+            margin: 0;
+            font-size: 22px;
+            font-weight: bold;
+            color: #2d6cdf;
+        }
 
-    pipeline = [
-        {
-            "$group": {
-                "_id": None,
-                "total_revenue": {"$sum": "$revenue"},
-                "total_expenses": {"$sum": "$expenses"},
-                "total_profit": {"$sum": "$profit"},
-                "average_revenue": {"$avg": "$revenue"},
-                "months_count": {"$sum": 1}
+        .charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .chart-box {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .table-box {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            margin-bottom: 25px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        table th, table td {
+            border: 1px solid #dcdcdc;
+            padding: 12px;
+            text-align: center;
+        }
+
+        table th {
+            background: #f0f3f7;
+        }
+
+        .buttons {
+            margin-top: 20px;
+        }
+
+        .buttons a {
+            display: inline-block;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            padding: 10px 16px;
+            background: #2d6cdf;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+        }
+
+        .buttons a:hover {
+            background: #1f4fa8;
+        }
+
+        .note {
+            background: #eef4ff;
+            border-left: 4px solid #2d6cdf;
+            padding: 15px;
+            border-radius: 6px;
+            color: #333;
+        }
+
+        @media (max-width: 1000px) {
+            .cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .charts {
+                grid-template-columns: 1fr;
             }
         }
-    ]
 
-    result = list(collection.aggregate(pipeline))
+        @media (max-width: 600px) {
+            .cards {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
 
-    if not result:
-        return None
+        <div class="header">
+            <h1>Система анализа финансовых данных</h1>
+            <p>Приложение разработано на Python Flask с использованием MongoDB и Docker Compose.</p>
+            <p>Ниже представлены результаты агрегации, графики финансовых данных и прогноз доходов на следующий квартал.</p>
 
-    summary = result[0]
-    summary.pop("_id", None)
-    return summary
+            <div class="buttons">
+                <a href="/aggregate" target="_blank">JSON агрегации</a>
+                <a href="/forecast" target="_blank">JSON прогноза</a>
+            </div>
+        </div>
 
+        <div class="cards">
+            <div class="card">
+                <h3>Общий доход</h3>
+                <p>{{ aggregation.total_revenue }}</p>
+            </div>
+            <div class="card">
+                <h3>Общие расходы</h3>
+                <p>{{ aggregation.total_expenses }}</p>
+            </div>
+            <div class="card">
+                <h3>Общая прибыль</h3>
+                <p>{{ aggregation.total_profit }}</p>
+            </div>
+            <div class="card">
+                <h3>Средний доход</h3>
+                <p>{{ aggregation.average_revenue | round(2) }}</p>
+            </div>
+            <div class="card">
+                <h3>Количество месяцев</h3>
+                <p>{{ aggregation.months_count }}</p>
+            </div>
+        </div>
 
-def get_forecast_data():
-    collection = get_collection()
+        <div class="charts">
+            <div class="chart-box">
+                <h2>Финансовые показатели по месяцам</h2>
+                <canvas id="financeChart"></canvas>
+            </div>
 
-    latest_data = list(
-        collection.find({}, {"_id": 0, "month": 1, "revenue": 1})
-        .sort("month", -1)
-        .limit(3)
-    )
+            <div class="chart-box">
+                <h2>Прогноз доходов на следующий квартал</h2>
+                <canvas id="forecastChart"></canvas>
+            </div>
+        </div>
 
-    if len(latest_data) < 3:
-        return None
+        <div class="table-box">
+            <h2>Исходные финансовые данные</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Месяц</th>
+                        <th>Доход</th>
+                        <th>Расходы</th>
+                        <th>Прибыль</th>
+                        <th>Категория</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in data %}
+                    <tr>
+                        <td>{{ item.month }}</td>
+                        <td>{{ item.revenue }}</td>
+                        <td>{{ item.expenses }}</td>
+                        <td>{{ item.profit }}</td>
+                        <td>{{ item.category }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
 
-    latest_data = list(reversed(latest_data))
-    revenues = [item["revenue"] for item in latest_data]
-    avg_revenue = sum(revenues) / len(revenues)
+        <div class="note">
+            Прогноз рассчитан на основе среднего дохода за последние 3 месяца.
+        </div>
 
-    forecast = {
-        "month_1": round(avg_revenue, 2),
-        "month_2": round(avg_revenue, 2),
-        "month_3": round(avg_revenue, 2),
-        "quarter_total": round(avg_revenue * 3, 2)
-    }
+    </div>
 
-    return {
-        "based_on_last_3_months": latest_data,
-        "next_quarter_forecast": forecast
-    }
+    <script>
+        const months = {{ months | tojson }};
+        const revenues = {{ revenues | tojson }};
+        const expenses = {{ expenses | tojson }};
+        const profits = {{ profits | tojson }};
 
+        const forecastLabels = {{ forecast_labels | tojson }};
+        const forecastValues = {{ forecast_values | tojson }};
 
-@app.route("/")
-def home():
-    data = get_all_data()
-    aggregation = get_aggregation()
-    forecast_data = get_forecast_data()
+        const financeCtx = document.getElementById('financeChart').getContext('2d');
+        new Chart(financeCtx, {
+            type: 'bar',
+            data: {
+                labels: months,
+                datasets: [
+                    {
+                        label: 'Доход',
+                        data: revenues,
+                        backgroundColor: 'rgba(45, 108, 223, 0.7)'
+                    },
+                    {
+                        label: 'Расходы',
+                        data: expenses,
+                        backgroundColor: 'rgba(220, 53, 69, 0.7)'
+                    },
+                    {
+                        label: 'Прибыль',
+                        data: profits,
+                        backgroundColor: 'rgba(40, 167, 69, 0.7)'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                }
+            }
+        });
 
-    months = [item["month"] for item in data]
-    revenues = [item["revenue"] for item in data]
-    expenses = [item["expenses"] for item in data]
-    profits = [item["profit"] for item in data]
-
-    forecast_labels = ["Следующий месяц 1", "Следующий месяц 2", "Следующий месяц 3"]
-    forecast_values = []
-
-    if forecast_data:
-        forecast_values = [
-            forecast_data["next_quarter_forecast"]["month_1"],
-            forecast_data["next_quarter_forecast"]["month_2"],
-            forecast_data["next_quarter_forecast"]["month_3"]
-        ]
-
-    return render_template(
-        "index.html",
-        data=data,
-        aggregation=aggregation,
-        forecast_data=forecast_data,
-        months=months,
-        revenues=revenues,
-        expenses=expenses,
-        profits=profits,
-        forecast_labels=forecast_labels,
-        forecast_values=forecast_values
-    )
-
-
-@app.route("/aggregate")
-def aggregate_data():
-    summary = get_aggregation()
-
-    if not summary:
-        return jsonify({"error": "Нет данных для агрегации"}), 404
-
-    return jsonify({
-        "aggregation_result": summary
-    })
-
-
-@app.route("/forecast")
-def forecast():
-    forecast_data = get_forecast_data()
-
-    if not forecast_data:
-        return jsonify({"error": "Недостаточно данных для прогноза. Нужно минимум 3 месяца."}), 400
-
-    return jsonify(forecast_data)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+        const forecastCtx = document.getElementById('forecastChart').getContext('2d');
+        new Chart(forecastCtx, {
+            type: 'line',
+            data: {
+                labels: forecastLabels,
+                datasets: [
+                    {
+                        label: 'Прогноз дохода',
+                        data: forecastValues,
+                        borderColor: 'rgba(45, 108, 223, 1)',
+                        backgroundColor: 'rgba(45, 108, 223, 0.2)',
+                        fill: true,
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
