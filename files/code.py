@@ -6,6 +6,11 @@ const db = require('./config/db');
 const app = express();
 const PORT = 3000;
 
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -26,6 +31,8 @@ app.get('/', (req, res) => {
 });
 
 app.post('/message', (req, res) => {
+  console.log('Тело запроса:', req.body);
+
   const { client_name, message_text } = req.body;
 
   if (!client_name || !message_text) {
