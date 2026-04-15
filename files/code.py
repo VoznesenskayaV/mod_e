@@ -1,154 +1,91 @@
+from flask import Flask, jsonify
+from pymongo import MongoClient
 import os
-from flask import Flask, render_template, jsonify
-from neo4j import GraphDatabase
 
 app = Flask(__name__)
 
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password12345")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/")
+DB_NAME = "finance_db"
+COLLECTION_NAME = "financial_data"
 
 
-def get_driver():
-    return GraphDatabase.driver(
-        NEO4J_URI,
-        auth=(NEO4J_USER, NEO4J_PASSWORD)
-    )
+def get_collection():
+    client = MongoClient(MONGO_URI)
+    db = client[DB_NAME]
+    return db[COLLECTION_NAME]
 
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+@app.route("/")
+def home():
+    return jsonify({
+        "message": "Система анализа финансовых данных работает",
+        "routes": {
+            "/aggregate": "Агрегация финансовых данных",
+            "/forecast": "Прогноз доходов на следующий квартал"
+        }
+    })
 
 
-@app.route('/health')
-def health():
-    try:
-        driver = get_driver()
-        with driver.session() as session:
-            result = session.run("RETURN 'Neo4j connection is OK' AS message")
-            record = result.single()
-        driver.close()
+@app.route("/aggregate")
+def aggregate_data():
+    collection = get_collection()
 
-        return jsonify({
-            "status": "ok",
-            "flask": "running",
-            "neo4j": record["message"]
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
-
-
-@app.route('/load')
-def load_data():
-    sample_data = [
+    pipeline = [
         {
-            "user": "Alice",
-            "post_id": "p1",
-            "content": "Learning Flask and Neo4j",
-            "hashtags": ["python", "flask", "neo4j"]
-        },
-        {
-            "user": "Bob",
-            "post_id": "p2",
-            "content": "Graph databases are powerful",
-            "hashtags": ["neo4j", "database", "graph"]
-        },
-        {
-            "user": "Alice",
-            "post_id": "p3",
-            "content": "Python for web development",
-            "hashtags": ["python", "flask", "web"]
-        },
-        {
-            "user": "Charlie",
-            "post_id": "p4",
-            "content": "AI trends in social media",
-            "hashtags": ["ai", "social", "python"]
-        },
-        {
-            "user": "Bob",
-            "post_id": "p5",
-            "content": "Using hashtags for analytics",
-            "hashtags": ["analytics", "social", "python"]
+            "$group": {
+                "_id": None,
+                "total_revenue": {"$sum": "$revenue"},
+                "total_expenses": {"$sum": "$expenses"},
+                "total_profit": {"$sum": "$profit"},
+                "average_revenue": {"$avg": "$revenue"},
+                "months_count": {"$sum": 1}
+            }
         }
     ]
 
-    try:
-        driver = get_driver()
-        with driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
+    result = list(collection.aggregate(pipeline))
 
-            for item in sample_data:
-                session.run(
-                    """
-                    MERGE (u:User {name: $user})
-                    CREATE (p:Post {id: $post_id, content: $content})
-                    MERGE (u)-[:CREATED]->(p)
-                    """,
-                    user=item["user"],
-                    post_id=item["post_id"],
-                    content=item["content"]
-                )
+    if not result:
+        return jsonify({"error": "Нет данных для агрегации"}), 404
 
-                for tag in item["hashtags"]:
-                    session.run(
-                        """
-                        MATCH (p:Post {id: $post_id})
-                        MERGE (h:Hashtag {name: $tag})
-                        MERGE (p)-[:HAS_TAG]->(h)
-                        """,
-                        post_id=item["post_id"],
-                        tag=tag
-                    )
+    summary = result[0]
+    summary.pop("_id", None)
 
-        driver.close()
-
-        return jsonify({
-            "status": "ok",
-            "message": "Sample data loaded successfully"
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+    return jsonify({
+        "aggregation_result": summary
+    })
 
 
-@app.route('/stats')
-def stats():
-    try:
-        driver = get_driver()
-        with driver.session() as session:
-            users_count = session.run(
-                "MATCH (u:User) RETURN count(u) AS count"
-            ).single()["count"]
+@app.route("/forecast")
+def forecast():
+    collection = get_collection()
 
-            posts_count = session.run(
-                "MATCH (p:Post) RETURN count(p) AS count"
-            ).single()["count"]
+    latest_data = list(
+        collection.find({}, {"_id": 0, "month": 1, "revenue": 1})
+        .sort("month", -1)
+        .limit(3)
+    )
 
-            hashtags_count = session.run(
-                "MATCH (h:Hashtag) RETURN count(h) AS count"
-            ).single()["count"]
+    if len(latest_data) < 3:
+        return jsonify({"error": "Недостаточно данных для прогноза. Нужно минимум 3 месяца."}), 400
 
-        driver.close()
+    latest_data = list(reversed(latest_data))
 
-        return jsonify({
-            "status": "ok",
-            "users": users_count,
-            "posts": posts_count,
-            "hashtags": hashtags_count
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+    revenues = [item["revenue"] for item in latest_data]
+    avg_revenue = sum(revenues) / len(revenues)
+
+    forecast_data = {
+        "next_quarter_forecast": {
+            "month_1": round(avg_revenue, 2),
+            "month_2": round(avg_revenue, 2),
+            "month_3": round(avg_revenue, 2),
+            "quarter_total": round(avg_revenue * 3, 2)
+        },
+        "based_on_last_3_months": latest_data
+    }
+
+    return jsonify(forecast_data)
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
