@@ -1,146 +1,86 @@
-from flask import Flask, jsonify, render_template
-from pymongo import MongoClient
-import os
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const db = require('./config/db');
 
-app = Flask(__name__)
+const app = express();
+const PORT = 3000;
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/")
-DB_NAME = "finance_db"
-COLLECTION_NAME = "financial_data"
+app.use(express.json());
 
+const logDirPath = '/usr/src/app/logs';
+const logFilePath = path.join(logDirPath, 'messages.log');
 
-def get_collection():
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    return db[COLLECTION_NAME]
+if (!fs.existsSync(logDirPath)) {
+  fs.mkdirSync(logDirPath, { recursive: true });
+}
 
+function writeLog(text) {
+  const logMessage = `[${new Date().toISOString()}] ${text}\n`;
+  fs.appendFileSync(logFilePath, logMessage, 'utf8');
+}
 
-def get_all_data():
-    collection = get_collection()
-    return list(collection.find({}, {"_id": 0}).sort("month", 1))
+app.get('/', (req, res) => {
+  res.send('Сервис чат-бота поддержки клиентов работает');
+});
 
+app.post('/message', (req, res) => {
+  const { client_name, message_text } = req.body;
 
-def get_aggregation():
-    collection = get_collection()
+  if (!client_name || !message_text) {
+    return res.status(400).json({
+      error: 'Поля client_name и message_text обязательны'
+    });
+  }
 
-    pipeline = [
-        {
-            "$group": {
-                "_id": None,
-                "total_revenue": {"$sum": "$revenue"},
-                "total_expenses": {"$sum": "$expenses"},
-                "total_profit": {"$sum": "$profit"},
-                "average_revenue": {"$avg": "$revenue"},
-                "months_count": {"$sum": 1}
-            }
-        }
-    ]
+  const sql = 'INSERT INTO messages (client_name, message_text) VALUES (?, ?)';
 
-    result = list(collection.aggregate(pipeline))
-
-    if not result:
-        return None
-
-    summary = result[0]
-    summary.pop("_id", None)
-    return summary
-
-
-def get_forecast_data():
-    collection = get_collection()
-
-    latest_data = list(
-        collection.find({}, {"_id": 0, "month": 1, "revenue": 1})
-        .sort("month", -1)
-        .limit(3)
-    )
-
-    if len(latest_data) < 3:
-        return None
-
-    latest_data = list(reversed(latest_data))
-    revenues = [item["revenue"] for item in latest_data]
-
-    growth1 = revenues[1] - revenues[0]
-    growth2 = revenues[2] - revenues[1]
-    avg_growth = (growth1 + growth2) / 2
-
-    last_value = revenues[-1]
-
-    forecast = {
-        "month_1": round(last_value + avg_growth, 2),
-        "month_2": round(last_value + avg_growth * 2, 2),
-        "month_3": round(last_value + avg_growth * 3, 2),
-        "quarter_total": round(
-            (last_value + avg_growth) +
-            (last_value + avg_growth * 2) +
-            (last_value + avg_growth * 3), 2
-        )
+  db.query(sql, [client_name, message_text], (err, result) => {
+    if (err) {
+      console.error('Ошибка при сохранении сообщения:', err.message);
+      return res.status(500).json({
+        error: 'Ошибка при сохранении сообщения'
+      });
     }
 
-    return {
-        "based_on_last_3_months": latest_data,
-        "average_monthly_growth": round(avg_growth, 2),
-        "next_quarter_forecast": forecast
+    writeLog(`Клиент: ${client_name}, сообщение: ${message_text}`);
+
+    res.status(201).json({
+      message: 'Сообщение успешно сохранено',
+      id: result.insertId,
+      bot_reply: `Здравствуйте, ${client_name}! Ваше обращение принято в обработку.`
+    });
+  });
+});
+
+app.get('/stats', (req, res) => {
+  const sql = `
+    SELECT client_name, COUNT(*) AS request_count
+    FROM messages
+    GROUP BY client_name
+    ORDER BY request_count DESC
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error('Ошибка при получении статистики:', err.message);
+      return res.status(500).json({
+        error: 'Ошибка при получении статистики'
+      });
     }
 
+    res.json(results);
+  });
+});
 
-@app.route("/")
-def home():
-    data = get_all_data()
-    aggregation = get_aggregation()
-    forecast_data = get_forecast_data()
+db.query('SELECT 1', (err) => {
+  if (err) {
+    console.error('Ошибка подключения к MySQL:', err.message);
+  } else {
+    console.log('Подключение к MySQL успешно выполнено');
+  }
 
-    months = [item["month"] for item in data]
-    revenues = [item["revenue"] for item in data]
-    expenses = [item["expenses"] for item in data]
-    profits = [item["profit"] for item in data]
-
-    forecast_labels = ["Следующий месяц 1", "Следующий месяц 2", "Следующий месяц 3"]
-    forecast_values = []
-
-    if forecast_data:
-        forecast_values = [
-            forecast_data["next_quarter_forecast"]["month_1"],
-            forecast_data["next_quarter_forecast"]["month_2"],
-            forecast_data["next_quarter_forecast"]["month_3"]
-        ]
-
-    return render_template(
-        "index.html",
-        data=data,
-        aggregation=aggregation,
-        forecast_data=forecast_data,
-        months=months,
-        revenues=revenues,
-        expenses=expenses,
-        profits=profits,
-        forecast_labels=forecast_labels,
-        forecast_values=forecast_values
-    )
-
-
-@app.route("/aggregate")
-def aggregate_data():
-    summary = get_aggregation()
-
-    if not summary:
-        return jsonify({"error": "Нет данных для агрегации"}), 404
-
-    return jsonify({
-        "aggregation_result": summary
-    })
-
-
-@app.route("/forecast")
-def forecast():
-    forecast_data = get_forecast_data()
-
-    if not forecast_data:
-        return jsonify({"error": "Недостаточно данных для прогноза. Нужно минимум 3 месяца."}), 400
-
-    return jsonify(forecast_data)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+  app.listen(PORT, () => {
+    console.log(`Сервер запущен на порту ${PORT}`);
+  });
+});
