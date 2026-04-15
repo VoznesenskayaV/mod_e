@@ -1,129 +1,136 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Анализ финансовых данных</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f6f8;
-            margin: 0;
-            padding: 0;
+from flask import Flask, jsonify, render_template
+from pymongo import MongoClient
+import os
+
+app = Flask(__name__)
+
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/")
+DB_NAME = "finance_db"
+COLLECTION_NAME = "financial_data"
+
+
+def get_collection():
+    client = MongoClient(MONGO_URI)
+    db = client[DB_NAME]
+    return db[COLLECTION_NAME]
+
+
+def get_all_data():
+    collection = get_collection()
+    return list(collection.find({}, {"_id": 0}).sort("month", 1))
+
+
+def get_aggregation():
+    collection = get_collection()
+
+    pipeline = [
+        {
+            "$group": {
+                "_id": None,
+                "total_revenue": {"$sum": "$revenue"},
+                "total_expenses": {"$sum": "$expenses"},
+                "total_profit": {"$sum": "$profit"},
+                "average_revenue": {"$avg": "$revenue"},
+                "months_count": {"$sum": 1}
+            }
         }
+    ]
 
-        .container {
-            width: 90%;
-            max-width: 1100px;
-            margin: 40px auto;
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-        }
+    result = list(collection.aggregate(pipeline))
 
-        h1, h2 {
-            color: #222;
-        }
+    if not result:
+        return None
 
-        p {
-            color: #444;
-            line-height: 1.5;
-        }
+    summary = result[0]
+    summary.pop("_id", None)
+    return summary
 
-        .buttons {
-            margin: 20px 0 30px 0;
-        }
 
-        .buttons a {
-            display: inline-block;
-            margin-right: 12px;
-            margin-bottom: 10px;
-            padding: 12px 18px;
-            background: #2d6cdf;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            transition: 0.2s;
-        }
+def get_forecast_data():
+    collection = get_collection()
 
-        .buttons a:hover {
-            background: #1f4fa8;
-        }
+    latest_data = list(
+        collection.find({}, {"_id": 0, "month": 1, "revenue": 1})
+        .sort("month", -1)
+        .limit(3)
+    )
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
+    if len(latest_data) < 3:
+        return None
 
-        table th, table td {
-            border: 1px solid #dcdcdc;
-            padding: 12px;
-            text-align: center;
-        }
+    latest_data = list(reversed(latest_data))
+    revenues = [item["revenue"] for item in latest_data]
+    avg_revenue = sum(revenues) / len(revenues)
 
-        table th {
-            background: #f0f3f7;
-        }
+    forecast = {
+        "month_1": round(avg_revenue, 2),
+        "month_2": round(avg_revenue, 2),
+        "month_3": round(avg_revenue, 2),
+        "quarter_total": round(avg_revenue * 3, 2)
+    }
 
-        .note {
-            margin-top: 25px;
-            padding: 15px;
-            background: #eef4ff;
-            border-left: 4px solid #2d6cdf;
-            border-radius: 6px;
-        }
+    return {
+        "based_on_last_3_months": latest_data,
+        "next_quarter_forecast": forecast
+    }
 
-        code {
-            background: #f3f3f3;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Система анализа финансовых данных</h1>
-        <p>
-            Веб-приложение разработано на <b>Python Flask</b> с использованием <b>MongoDB</b> в Docker-контейнерах.
-        </p>
-        <p>
-            Приложение выполняет агрегацию финансовых данных и строит прогноз доходов на следующий квартал.
-        </p>
 
-        <div class="buttons">
-            <a href="/aggregate" target="_blank">Открыть агрегацию данных</a>
-            <a href="/forecast" target="_blank">Открыть прогноз доходов</a>
-        </div>
+@app.route("/")
+def home():
+    data = get_all_data()
+    aggregation = get_aggregation()
+    forecast_data = get_forecast_data()
 
-        <h2>Исходные финансовые данные</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Месяц</th>
-                    <th>Доход</th>
-                    <th>Расходы</th>
-                    <th>Прибыль</th>
-                    <th>Категория</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in data %}
-                <tr>
-                    <td>{{ item.month }}</td>
-                    <td>{{ item.revenue }}</td>
-                    <td>{{ item.expenses }}</td>
-                    <td>{{ item.profit }}</td>
-                    <td>{{ item.category }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    months = [item["month"] for item in data]
+    revenues = [item["revenue"] for item in data]
+    expenses = [item["expenses"] for item in data]
+    profits = [item["profit"] for item in data]
 
-        <div class="note">
-            Для проверки API можно использовать маршруты:
-            <code>/aggregate</code> и <code>/forecast</code>.
-        </div>
-    </div>
-</body>
-</html>
+    forecast_labels = ["Следующий месяц 1", "Следующий месяц 2", "Следующий месяц 3"]
+    forecast_values = []
+
+    if forecast_data:
+        forecast_values = [
+            forecast_data["next_quarter_forecast"]["month_1"],
+            forecast_data["next_quarter_forecast"]["month_2"],
+            forecast_data["next_quarter_forecast"]["month_3"]
+        ]
+
+    return render_template(
+        "index.html",
+        data=data,
+        aggregation=aggregation,
+        forecast_data=forecast_data,
+        months=months,
+        revenues=revenues,
+        expenses=expenses,
+        profits=profits,
+        forecast_labels=forecast_labels,
+        forecast_values=forecast_values
+    )
+
+
+@app.route("/aggregate")
+def aggregate_data():
+    summary = get_aggregation()
+
+    if not summary:
+        return jsonify({"error": "Нет данных для агрегации"}), 404
+
+    return jsonify({
+        "aggregation_result": summary
+    })
+
+
+@app.route("/forecast")
+def forecast():
+    forecast_data = get_forecast_data()
+
+    if not forecast_data:
+        return jsonify({"error": "Недостаточно данных для прогноза. Нужно минимум 3 месяца."}), 400
+
+    return jsonify(forecast_data)
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
