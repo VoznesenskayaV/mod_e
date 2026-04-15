@@ -1,275 +1,95 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Система прогнозирования спроса</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+document.addEventListener('DOMContentLoaded', () => {
 
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f7fb;
-            color: #1f2937;
-        }
+  const checkServerBtn = document.getElementById('checkServerBtn');
+  const serverStatus = document.getElementById('serverStatus');
 
-        .container {
-            width: 90%;
-            max-width: 1200px;
-            margin: 30px auto;
-        }
+  const checkDbBtn = document.getElementById('checkDbBtn');
+  const dbStatus = document.getElementById('dbStatus');
 
-        .header {
-            background: linear-gradient(135deg, #1d4ed8, #2563eb);
-            color: white;
-            padding: 30px;
-            border-radius: 16px;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-            margin-bottom: 25px;
-        }
+  const loadSalesBtn = document.getElementById('loadSalesBtn');
+  const salesContainer = document.getElementById('salesContainer');
 
-        .header h1 {
-            margin: 0 0 10px 0;
-            font-size: 32px;
-        }
+  checkServerBtn.addEventListener('click', async () => {
+    serverStatus.textContent = 'Проверка сервера...';
 
-        .header p {
-            margin: 0;
-            font-size: 16px;
-            opacity: 0.95;
-        }
+    try {
+      const response = await fetch('/api/health');
+      const data = await response.json();
 
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 20px;
-            margin-bottom: 25px;
-        }
+      serverStatus.innerHTML = `
+        <strong>Статус:</strong> ${data.message}<br>
+        <strong>Успех:</strong> ${data.success}<br>
+        <strong>Время:</strong> ${new Date(data.timestamp).toLocaleString()}
+      `;
+    } catch (error) {
+      serverStatus.innerHTML = `<strong>Ошибка:</strong> сервер недоступен`;
+    }
+  });
 
-        .card {
-            background: white;
-            border-radius: 16px;
-            padding: 22px;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.08);
-        }
+  checkDbBtn.addEventListener('click', async () => {
+    dbStatus.textContent = 'Проверка базы данных...';
 
-        .card h3 {
-            margin: 0 0 10px 0;
-            font-size: 16px;
-            color: #6b7280;
-        }
+    try {
+      const response = await fetch('/api/db-status');
+      const data = await response.json();
 
-        .card .value {
-            font-size: 32px;
-            font-weight: bold;
-            color: #111827;
-        }
+      dbStatus.innerHTML = `
+        <strong>Статус базы:</strong> ${data.databaseStatus}
+      `;
+    } catch (error) {
+      dbStatus.innerHTML = `<strong>Ошибка:</strong> база недоступна`;
+    }
+  });
 
-        .section {
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.08);
-            margin-bottom: 25px;
-        }
+  loadSalesBtn.addEventListener('click', async () => {
+    salesContainer.textContent = 'Загрузка продаж...';
 
-        .section h2 {
-            margin-top: 0;
-            margin-bottom: 18px;
-            font-size: 24px;
-        }
+    try {
+      const response = await fetch('/api/sales');
+      const data = await response.json();
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            overflow: hidden;
-            border-radius: 12px;
-        }
+      if (!data.sales || data.sales.length === 0) {
+        salesContainer.innerHTML = 'Продажи не найдены';
+        return;
+      }
 
-        thead {
-            background: #2563eb;
-            color: white;
-        }
+      let tableHtml = `
+        <table>
+          <thead>
+            <tr>
+              <th>Товар</th>
+              <th>Категория</th>
+              <th>Количество</th>
+              <th>Цена</th>
+              <th>Сумма</th>
+              <th>Дата</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
 
-        th, td {
-            padding: 14px 16px;
-            text-align: left;
-            border-bottom: 1px solid #e5e7eb;
-        }
+      data.sales.forEach((sale) => {
+        tableHtml += `
+          <tr>
+            <td>${sale.productName}</td>
+            <td>${sale.category}</td>
+            <td>${sale.quantity}</td>
+            <td>${sale.price}</td>
+            <td>${sale.totalAmount}</td>
+            <td>${new Date(sale.saleDate).toLocaleDateString()}</td>
+          </tr>
+        `;
+      });
 
-        tbody tr:hover {
-            background: #f9fafb;
-        }
+      tableHtml += `
+          </tbody>
+        </table>
+      `;
 
-        .analytics-list {
-            margin: 0;
-            padding: 0;
-            list-style: none;
-        }
+      salesContainer.innerHTML = tableHtml;
+    } catch (error) {
+      salesContainer.innerHTML = `<strong>Ошибка:</strong> не удалось загрузить продажи`;
+    }
+  });
 
-        .analytics-list li {
-            padding: 12px 0;
-            border-bottom: 1px solid #e5e7eb;
-            font-size: 16px;
-        }
-
-        .analytics-list li:last-child {
-            border-bottom: none;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 6px 10px;
-            background: #dbeafe;
-            color: #1d4ed8;
-            border-radius: 999px;
-            font-size: 13px;
-            font-weight: bold;
-        }
-
-        .chart-container {
-            position: relative;
-            height: 420px;
-        }
-
-        .footer {
-            text-align: center;
-            color: #6b7280;
-            margin: 20px 0 40px;
-            font-size: 14px;
-        }
-
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 24px;
-            }
-
-            .card .value {
-                font-size: 26px;
-            }
-
-            th, td {
-                padding: 10px 12px;
-                font-size: 14px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Система прогнозирования спроса</h1>
-            <p>Аналитическая панель по товарам и среднему спросу по категориям</p>
-        </div>
-
-        <div class="grid">
-            <div class="card">
-                <h3>Всего товаров</h3>
-                <div class="value">{{ total_products }}</div>
-            </div>
-
-            <div class="card">
-                <h3>Количество категорий</h3>
-                <div class="value">{{ total_categories }}</div>
-            </div>
-
-            <div class="card">
-                <h3>Максимальный спрос</h3>
-                <div class="value">{{ max_demand }}</div>
-            </div>
-
-            <div class="card">
-                <h3>Средний спрос по всем товарам</h3>
-                <div class="value">{{ overall_avg }}</div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Таблица товаров</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Название товара</th>
-                        <th>Категория</th>
-                        <th>Спрос</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for product in products %}
-                    <tr>
-                        <td>{{ product.id }}</td>
-                        <td>{{ product.product_name }}</td>
-                        <td><span class="badge">{{ product.category }}</span></td>
-                        <td>{{ product.demand_value }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="section">
-            <h2>Средний спрос по категориям</h2>
-            <ul class="analytics-list">
-                {% for item in averages %}
-                <li>
-                    <strong>{{ item.category }}</strong> — средний спрос: <strong>{{ item.average_demand }}</strong>
-                </li>
-                {% endfor %}
-            </ul>
-        </div>
-
-        <div class="section">
-            <h2>График среднего спроса по категориям</h2>
-            <div class="chart-container">
-                <canvas id="demandChart"></canvas>
-            </div>
-        </div>
-
-        <div class="footer">
-            Отчетная аналитическая панель для задания по Docker, Flask и PostgreSQL
-        </div>
-    </div>
-
-    <script>
-        const categoryLabels = {{ chart_labels | tojson }};
-        const categoryValues = {{ chart_values | tojson }};
-
-        const ctx = document.getElementById('demandChart').getContext('2d');
-
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: categoryLabels,
-                datasets: [{
-                    label: 'Средний спрос',
-                    data: categoryValues,
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: true
-                    },
-                    title: {
-                        display: true,
-                        text: 'Средний спрос по категориям товаров'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-    </script>
-</body>
-</html>
+});
