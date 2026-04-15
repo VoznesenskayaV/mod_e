@@ -1,86 +1,49 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const db = require('./config/db');
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Чат-бот поддержки клиентов</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>Чат-бот поддержки клиентов</h1>
+    <p class="subtitle">Отправка обращения клиента</p>
 
-const app = express();
-const PORT = 3000;
+    <form id="messageForm">
+      <label for="client_name">Имя клиента</label>
+      <input type="text" id="client_name" name="client_name" placeholder="Введите имя" required />
 
-app.use(express.json());
+      <label for="message_text">Сообщение</label>
+      <textarea id="message_text" name="message_text" placeholder="Введите обращение" required></textarea>
 
-const logDirPath = '/usr/src/app/logs';
-const logFilePath = path.join(logDirPath, 'messages.log');
+      <button type="submit">Отправить сообщение</button>
+    </form>
 
-if (!fs.existsSync(logDirPath)) {
-  fs.mkdirSync(logDirPath, { recursive: true });
-}
+    <div id="responseBlock" class="card hidden">
+      <h2>Ответ системы</h2>
+      <p id="responseText"></p>
+    </div>
 
-function writeLog(text) {
-  const logMessage = `[${new Date().toISOString()}] ${text}\n`;
-  fs.appendFileSync(logFilePath, logMessage, 'utf8');
-}
+    <div class="stats-section">
+      <button id="loadStatsBtn">Показать статистику обращений</button>
 
-app.get('/', (req, res) => {
-  res.send('Сервис чат-бота поддержки клиентов работает');
-});
+      <div id="statsBlock" class="card hidden">
+        <h2>Статистика обращений</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Клиент</th>
+              <th>Количество обращений</th>
+            </tr>
+          </thead>
+          <tbody id="statsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-app.post('/message', (req, res) => {
-  const { client_name, message_text } = req.body;
-
-  if (!client_name || !message_text) {
-    return res.status(400).json({
-      error: 'Поля client_name и message_text обязательны'
-    });
-  }
-
-  const sql = 'INSERT INTO messages (client_name, message_text) VALUES (?, ?)';
-
-  db.query(sql, [client_name, message_text], (err, result) => {
-    if (err) {
-      console.error('Ошибка при сохранении сообщения:', err.message);
-      return res.status(500).json({
-        error: 'Ошибка при сохранении сообщения'
-      });
-    }
-
-    writeLog(`Клиент: ${client_name}, сообщение: ${message_text}`);
-
-    res.status(201).json({
-      message: 'Сообщение успешно сохранено',
-      id: result.insertId,
-      bot_reply: `Здравствуйте, ${client_name}! Ваше обращение принято в обработку.`
-    });
-  });
-});
-
-app.get('/stats', (req, res) => {
-  const sql = `
-    SELECT client_name, COUNT(*) AS request_count
-    FROM messages
-    GROUP BY client_name
-    ORDER BY request_count DESC
-  `;
-
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error('Ошибка при получении статистики:', err.message);
-      return res.status(500).json({
-        error: 'Ошибка при получении статистики'
-      });
-    }
-
-    res.json(results);
-  });
-});
-
-db.query('SELECT 1', (err) => {
-  if (err) {
-    console.error('Ошибка подключения к MySQL:', err.message);
-  } else {
-    console.log('Подключение к MySQL успешно выполнено');
-  }
-
-  app.listen(PORT, () => {
-    console.log(`Сервер запущен на порту ${PORT}`);
-  });
-});
+  <script src="script.js"></script>
+</body>
+</html>
