@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template
 from pymongo import MongoClient
 import os
 
@@ -17,13 +17,9 @@ def get_collection():
 
 @app.route("/")
 def home():
-    return jsonify({
-        "message": "Система анализа финансовых данных работает",
-        "routes": {
-            "/aggregate": "Агрегация финансовых данных",
-            "/forecast": "Прогноз доходов на следующий квартал"
-        }
-    })
+    collection = get_collection()
+    data = list(collection.find({}, {"_id": 0}))
+    return render_template("index.html", data=data)
 
 
 @app.route("/aggregate")
