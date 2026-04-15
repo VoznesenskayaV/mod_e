@@ -1,135 +1,154 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Task 1 — Аналитика посещаемости</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            background: #f4f6f9;
-            color: #222;
-        }
-        .container {
-            width: 1100px;
-            margin: 30px auto;
-        }
-        .header {
-            background: #1f4e79;
-            color: white;
-            padding: 20px 30px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        }
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 20px 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        }
-        h1, h2, h3 {
-            margin-top: 0;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-            margin-top: 15px;
-        }
-        .stat-box {
-            background: #eef3f8;
-            padding: 16px;
-            border-radius: 10px;
-        }
-        .btn {
-            display: inline-block;
-            padding: 12px 18px;
-            background: #1f4e79;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            margin-right: 10px;
-        }
-        .btn:hover {
-            background: #163a5c;
-        }
-        ul {
-            padding-left: 20px;
-        }
-        img {
-            max-width: 100%;
-            border-radius: 10px;
-            border: 1px solid #ddd;
-        }
-        .footer-note {
-            color: #666;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Система анализа посещаемости сайта</h1>
-            <p>Задание 1. Flask + InfluxDB + Docker + прогноз посещаемости</p>
-        </div>
+import os
+from flask import Flask, render_template, jsonify
+from neo4j import GraphDatabase
 
-        <div class="card">
-            <h2>Управление системой</h2>
-            <a class="btn" href="/load_data" target="_blank">Загрузить данные в InfluxDB</a>
-            <a class="btn" href="/stats" target="_blank">Открыть JSON-статистику</a>
-            <a class="btn" href="/visits" target="_blank">Открыть JSON-данные</a>
-            <a class="btn" href="/forecast_data" target="_blank">Открыть данные прогноза</a>
-        </div>
+app = Flask(__name__)
 
-        <div class="card">
-            <h2>Основные показатели</h2>
-            <div class="stats-grid">
-                <div class="stat-box">
-                    <h3>Всего посещений</h3>
-                    <p>{{ stats.total_visits }}</p>
-                </div>
-                <div class="stat-box">
-                    <h3>Уникальных пользователей</h3>
-                    <p>{{ stats.unique_users }}</p>
-                </div>
-                <div class="stat-box">
-                    <h3>Средняя длительность</h3>
-                    <p>{{ stats.avg_duration }} сек.</p>
-                </div>
-            </div>
-        </div>
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password12345")
 
-        <div class="card">
-            <h2>Топ страниц</h2>
-            <ul>
-                {% for page, count in stats.top_pages.items() %}
-                    <li><strong>{{ page }}</strong> — {{ count }} посещений</li>
-                {% endfor %}
-            </ul>
-        </div>
 
-        <div class="card">
-            <h2>Источники трафика</h2>
-            <ul>
-                {% for source, count in stats.top_sources.items() %}
-                    <li><strong>{{ source }}</strong> — {{ count }} посещений</li>
-                {% endfor %}
-            </ul>
-        </div>
+def get_driver():
+    return GraphDatabase.driver(
+        NEO4J_URI,
+        auth=(NEO4J_USER, NEO4J_PASSWORD)
+    )
 
-        <div class="card">
-            <h2>Прогноз посещаемости</h2>
-            <p>Ниже отображается график фактической посещаемости и прогноз на 7 дней вперед.</p>
-            <img src="/forecast" alt="Прогноз посещаемости">
-        </div>
 
-        <div class="card">
-            <p class="footer-note">
-                Интерфейс демонстрирует наличие данных, аналитических показателей и прогноза посещаемости в одном окне браузера.
-            </p>
-        </div>
-    </div>
-</body>
-</html>
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/health')
+def health():
+    try:
+        driver = get_driver()
+        with driver.session() as session:
+            result = session.run("RETURN 'Neo4j connection is OK' AS message")
+            record = result.single()
+        driver.close()
+
+        return jsonify({
+            "status": "ok",
+            "flask": "running",
+            "neo4j": record["message"]
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+@app.route('/load')
+def load_data():
+    sample_data = [
+        {
+            "user": "Alice",
+            "post_id": "p1",
+            "content": "Learning Flask and Neo4j",
+            "hashtags": ["python", "flask", "neo4j"]
+        },
+        {
+            "user": "Bob",
+            "post_id": "p2",
+            "content": "Graph databases are powerful",
+            "hashtags": ["neo4j", "database", "graph"]
+        },
+        {
+            "user": "Alice",
+            "post_id": "p3",
+            "content": "Python for web development",
+            "hashtags": ["python", "flask", "web"]
+        },
+        {
+            "user": "Charlie",
+            "post_id": "p4",
+            "content": "AI trends in social media",
+            "hashtags": ["ai", "social", "python"]
+        },
+        {
+            "user": "Bob",
+            "post_id": "p5",
+            "content": "Using hashtags for analytics",
+            "hashtags": ["analytics", "social", "python"]
+        }
+    ]
+
+    try:
+        driver = get_driver()
+        with driver.session() as session:
+            session.run("MATCH (n) DETACH DELETE n")
+
+            for item in sample_data:
+                session.run(
+                    """
+                    MERGE (u:User {name: $user})
+                    CREATE (p:Post {id: $post_id, content: $content})
+                    MERGE (u)-[:CREATED]->(p)
+                    """,
+                    user=item["user"],
+                    post_id=item["post_id"],
+                    content=item["content"]
+                )
+
+                for tag in item["hashtags"]:
+                    session.run(
+                        """
+                        MATCH (p:Post {id: $post_id})
+                        MERGE (h:Hashtag {name: $tag})
+                        MERGE (p)-[:HAS_TAG]->(h)
+                        """,
+                        post_id=item["post_id"],
+                        tag=tag
+                    )
+
+        driver.close()
+
+        return jsonify({
+            "status": "ok",
+            "message": "Sample data loaded successfully"
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+@app.route('/stats')
+def stats():
+    try:
+        driver = get_driver()
+        with driver.session() as session:
+            users_count = session.run(
+                "MATCH (u:User) RETURN count(u) AS count"
+            ).single()["count"]
+
+            posts_count = session.run(
+                "MATCH (p:Post) RETURN count(p) AS count"
+            ).single()["count"]
+
+            hashtags_count = session.run(
+                "MATCH (h:Hashtag) RETURN count(h) AS count"
+            ).single()["count"]
+
+        driver.close()
+
+        return jsonify({
+            "status": "ok",
+            "users": users_count,
+            "posts": posts_count,
+            "hashtags": hashtags_count
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
